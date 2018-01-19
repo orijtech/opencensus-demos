@@ -22,4 +22,21 @@ message Reservation {
   string Code	      = 3;
   string Instructions = 4;
   double Time	      = 5;
+  Error Error         = 6;
+}
+
+message Error {
+  int32 Code     = 1;
+  string Message = 2;
+}
+
+message Reservations {
+  repeated Reservation Items = 1;
+}
+
+service App {
+  rpc Delete(Reservation) returns (Error) {}
+  rpc FindByCode(Reservation) returns (Reservation) {}
+  rpc FindByEmail(Reservation) returns (Reservations) {}
+  rpc Create(Reservation) returns (Reservation) {}
 }
