@@ -19,6 +19,27 @@ figure out what services to optimize for, what metrics
 their business development team will present, the popularity
 of their service, general performance, error rates.
 
+## Installing it
+```shell
+$ go get -u -v github.com/orijtech/opencensus-demos/vision
+```
+
+## Running it
+```shell
+$ GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/census-demos-237a8e1e41df.json vision --gcp-id census-demos
+```
+where
+* `GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/census-demos-237a8e1e41df.json`
+an alternate way of setting the Google authentication credentials if you didn't
+set them in your environment already
+* `--gcp-id`: the ID of the project
+
+### Browser app
+You can visit http://localhost:8899/
+
+### Commandline app
+Please see the routes sub-section and sample responses
+
 ## Routes
 Route|Purpose
 ---|---

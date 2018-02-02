@@ -26,18 +26,20 @@ import (
 	"cloud.google.com/go/vision/apiv1"
 	pb "google.golang.org/genproto/googleapis/cloud/vision/v1"
 
-	"go.opencensus.io/exporter/stats/prometheus"
-	"go.opencensus.io/exporter/stats/stackdriver"
+	"go.opencensus.io/exporter/prometheus"
+	"go.opencensus.io/exporter/stackdriver"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/trace"
 )
 
 var (
-	byteCountMeasure  stats.Measure
-	byteBucketMeasure stats.Measure
-	errCountMeasure   stats.Measure
-	imageCountMeasure stats.Measure
-	urlCountMeasure   stats.Measure
+	byteCountMeasure        stats.Measure
+	byteBucketMeasure       stats.Measure
+	errCountMeasure         stats.Measure
+	imageCountMeasure       stats.Measure
+	base64ImageCountMeasure stats.Measure
+	dbSaveErrorCountMeasure stats.Measure
+	urlCountMeasure         stats.Measure
 )
 
 func init() {
@@ -61,6 +63,7 @@ func init() {
 		log.Fatalf("stackDriver exporter: %v", err)
 	}
 	stats.RegisterExporter(stackDExp)
+	trace.RegisterExporter(stackDExp)
 
 	errCountMeasure = mustCreateCountMeasure(func() (stats.Measure, error) {
 		return stats.NewMeasureInt64("vision/measures/errors_cum", "number of errors", "error")
@@ -76,6 +79,19 @@ func init() {
 		"number of images uploaded over time",
 	)
 
+	base64ImageCountMeasure = mustCreateCountMeasure(func() (stats.Measure, error) {
+		return stats.NewMeasureInt64("vision/measures/base64_uploads_cum", "number of base64 images uploaded", "image")
+	},
+		"base64_images_cum",
+		"number of base64 images uploaded over time",
+	)
+	dbSaveErrorCountMeasure = mustCreateCountMeasure(func() (stats.Measure, error) {
+		return stats.NewMeasureInt64("vision/measures/db_save_error_cum", "number of DB save errors", "error")
+	},
+		"db_save_error_cum",
+		"number of DB save errors",
+	)
+
 	byteCountMeasure = mustCreateDistMeasure(func() (stats.Measure, error) {
 		return stats.NewMeasureInt64("vision/measures/bytes_in_cum", "the number of bytes processed", "byte")
 	},
@@ -86,7 +102,8 @@ func init() {
 	)
 
 	// Now set the reporting period
-	stats.SetReportingPeriod(15 * time.Second)
+	stats.SetReportingPeriod(1 * time.Second)
+	trace.SetDefaultSampler(trace.AlwaysSample())
 }
 
 func mustCreateCountMeasure(measureFn func() (stats.Measure, error), name, desc string) stats.Measure {
@@ -135,9 +152,17 @@ func recordStatsErrorCount(ctx context.Context, n int64) {
 	stats.Record(ctx, errCountMeasure.(*stats.MeasureInt64).M(n))
 }
 
+func recordStatsBase64UploadsCount(ctx context.Context, n int64) {
+	stats.Record(ctx, base64ImageCountMeasure.(*stats.MeasureInt64).M(n))
+}
+
+func recordStatsDBErrorCount(ctx context.Context, n int64) {
+	stats.Record(ctx, dbSaveErrorCountMeasure.(*stats.MeasureInt64).M(n))
+}
+
 func detectFacesAndLogos(r io.Reader, ctx context.Context) (*DetectionResult, error) {
-	ctx = trace.StartSpan(ctx, "/detect")
-	defer trace.EndSpan(ctx)
+	ctx, span := trace.StartSpan(ctx, "/detect-faces-and-logos")
+	defer span.End()
 
 	client, err := vision.NewImageAnnotatorClient(ctx)
 	if err != nil {

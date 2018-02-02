@@ -1,0 +1,76 @@
+<HTML>
+  <head>
+    <script>
+      function takePicture() {
+	var canvas = document.getElementById('canvas');
+	var context = canvas.getContext('2d');
+	var video = document.getElementById('video');
+	context.drawImage(video, 0, 0, 640, 480);
+
+	// Next send the image to the browser for processing
+	var pngURI = canvas.toDataURL();
+	uploadImageForProcessing(pngURI);
+      }
+
+      function uploadImageForProcessing(imgURI) {
+	var xhr = new XMLHttpRequest();
+	xhr.open('POST', '/upload', true);
+	var form = new FormData();
+	form.append('file', imgURI);
+	// var mpartBoundary='--foobar';
+	// xhr.setRequestHeader('Content-Type', 'multipart/form-data; boundary="'+mpartBoundary+'"');
+	// xhr.send('multipart-boundary="'+mpartBoundary + '";file='+imgURI);
+	xhr.onreadystatechange = function() {
+	  if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+	    var canvas = document.getElementById('canvas');
+	    var context = canvas.getContext('2d');
+	    var resp = JSON.parse(xhr.responseText);
+	    console.log(resp);
+	    if (resp.faces.length === 0) {
+	      alert("No faces detected :(");
+	      return;
+	    }
+
+	    resp.faces.forEach(function(face) {
+	      // console.log(face);
+	      var bound = face.bounding_poly;
+	      var v = bound.vertices;
+	      context.strokeStyle = '#' + (Math.ceil(Math.random() * 0xFFFFFF)).toString(16);
+	      context.rect(v[0].x, v[0].y, v[2].x, v[2].y);
+	      context.stroke();
+	    });
+	  } else {
+	    console.log(arguments);
+	  }
+	}
+	xhr.send(form);
+      }
+
+    </script> 
+  </head>
+  <body>
+    <video id="video" style="margin-left:auto;margin-right:10;height:20vh;width:30vw"autoplay></video>
+    <br />
+    <div id="error_here"></div>
+    <br />
+    <button id="capture"><img style="height:10vh; margin-left:auto;margin-right:auto" onclick="takePicture()" src="/camera.png"></img></button>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    <script>
+      // When the page is ready
+      (function() {
+	if (!navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+	  var errElem = document.getElementById('error_here');
+	  errElem.innerHTML('<p>Please provide camera access!</p>');
+	  return;
+	}
+
+	var video = document.getElementById('video');
+	navigator.mediaDevices.getUserMedia({video: true}).then(function(sm) {
+	  console.log('video ', video);
+	  video.src = window.URL.createObjectURL(sm);
+	  video.play();
+	});
+      })();
+    </script>
+  </body>
+</HTML>
