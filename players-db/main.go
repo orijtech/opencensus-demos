@@ -15,6 +15,7 @@ import (
 
 	"go.opencensus.io/exporter/stackdriver"
 	"go.opencensus.io/plugin/grpc/grpcstats"
+	"go.opencensus.io/plugin/http/httptrace"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"go.opencensus.io/trace"
@@ -136,6 +137,10 @@ func newPlayers(ctx context.Context, client *spanner.Client, players ...*Player)
 	return err
 }
 
+var httpClient = http.Client{
+	Transport: httptrace.NewTransport(),
+}
+
 func nUUIDs(ctx context.Context, count int64) ([]string, error) {
 	ctx, span := trace.StartSpan(ctx, "new-uuid")
 	defer span.End()
@@ -148,7 +153,7 @@ func nUUIDs(ctx context.Context, count int64) ([]string, error) {
 	log.Printf("Invoking /uuids with spanContext: %+v\n", sc)
 
 	req = req.WithContext(ctx)
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

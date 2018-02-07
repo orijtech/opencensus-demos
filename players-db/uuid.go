@@ -12,6 +12,7 @@ import (
 
 	"go.opencensus.io/exporter/stackdriver"
 	"go.opencensus.io/plugin/grpc/grpcstats"
+	"go.opencensus.io/plugin/http/httptrace"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/trace"
 
@@ -51,7 +52,7 @@ func main() {
 
 	trace.SetDefaultSampler(trace.AlwaysSample())
 
-	http.HandleFunc("/uuids", handleCreateUUIDs)
+	http.Handle("/uuids", httptrace.NewHandler(http.HandlerFunc(handleCreateUUIDs)))
 	if err := http.ListenAndServe(":8989", nil); err != nil {
 		log.Fatalf("http.ListenAndServe: %v", err)
 	}
