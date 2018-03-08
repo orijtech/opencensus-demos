@@ -14,9 +14,9 @@ import (
 	"golang.org/x/net/context"
 
 	"go.opencensus.io/exporter/stackdriver"
-	"go.opencensus.io/plugin/grpc/grpcstats"
-	"go.opencensus.io/plugin/http/httptrace"
-	"go.opencensus.io/stats"
+	"go.opencensus.io/plugin/ocgrpc"
+	"go.opencensus.io/plugin/ochttp"
+	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.opencensus.io/trace"
 )
@@ -45,13 +45,13 @@ func main() {
 	trace.RegisterExporter(se)
 
 	// Enable metrics collection
-	stats.RegisterExporter(se)
+	view.RegisterExporter(se)
 
-	// Stats that we are interested in
-	views := []*stats.View{
-		grpcstats.RPCClientErrorCountMinuteView,
-		grpcstats.RPCClientRoundTripLatencyView,
-		grpcstats.RPCClientRequestBytesView,
+	// Views that we are interested in
+	views := []*view.View{
+		ocgrpc.ClientErrorCountView,
+		ocgrpc.ClientRoundTripLatencyView,
+		ocgrpc.ClientRequestBytesView,
 	}
 	for i, v := range views {
 		if err := v.Subscribe(); err != nil {
@@ -138,7 +138,7 @@ func newPlayers(ctx context.Context, client *spanner.Client, players ...*Player)
 }
 
 var httpClient = http.Client{
-	Transport: httptrace.NewTransport(),
+	Transport: &ochttp.Transport{},
 }
 
 func nUUIDs(ctx context.Context, count int64) ([]string, error) {
