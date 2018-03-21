@@ -30,6 +30,7 @@ import (
 	"go.opencensus.io/exporter/stackdriver"
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/plugin/ochttp/propagation/b3"
+	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 
 	"github.com/orijtech/youtube"
@@ -51,11 +52,15 @@ func init() {
 		log.Fatalf("Stackdriver newExporter: %v", err)
 	}
 	trace.RegisterExporter(se)
+	view.RegisterExporter(se)
+	if err := view.Subscribe(ochttp.DefaultServerViews...); err != nil {
+		log.Fatalf("Failed to subscribe to views: %v", err)
+	}
 	log.Printf("Finished exporter registration")
 
 	envAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	yc, err = youtube.NewWithHTTPClient(&http.Client{
-		Transport: &gat.APIKey{Key: envAPIKey},
+		Transport: &ochttp.Transport{Base: &gat.APIKey{Key: envAPIKey}},
 	})
 	if err != nil {
 		log.Fatalf("Failed to create youtube API client: %v", err)
@@ -94,11 +99,13 @@ func main() {
 
 type query struct {
 	Keywords   string `json:"keywords"`
-	MaxPerPage int64 `json:"max_per_page"`
-	MaxPages   int64 `json:"max_pages"`
+	MaxPerPage int64  `json:"max_per_page"`
+	MaxPages   int64  `json:"max_pages"`
 }
 
 func search(w http.ResponseWriter, r *http.Request) {
+	sc := trace.FromContext(r.Context()).SpanContext()
+	log.Printf("search here: %+v\n", sc)
 	ctx, span := trace.StartSpan(r.Context(), "/search")
 	defer span.End()
 
@@ -135,7 +142,7 @@ func search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Otherwise that was a cache-miss, now retrieve it then save it
-	pagesChan, err := yc.Search(&youtube.SearchParam{
+	pagesChan, err := yc.Search(ctx, &youtube.SearchParam{
 		Query:             keywords,
 		MaxPage:           uint64(q.MaxPages),
 		MaxResultsPerPage: uint64(q.MaxPerPage),

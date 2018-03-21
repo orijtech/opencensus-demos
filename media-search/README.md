@@ -20,7 +20,7 @@ Giving such:
 
 ##### Go server
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/census-demos-237a8e1e41df.json go run main.go 
+GOOGLE_APPLICATION_CREDENTIALS=~/Downloads/census-demos-237a8e1e41df.json go run server.go 
 
 2018/03/20 12:44:30 Finished exporter registration
 2018/03/20 12:44:30 Serving on ":9778"

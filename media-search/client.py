@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright 2017, OpenCensus Authors
+Copyright 2018, OpenCensus Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ from opencensus.trace import config_integration
 # Trace our HTTP requests module
 integration = ['requests']
 config_integration.trace_integrations(integration)
-tracer = tracer_module.Tracer()
 exporter = stackdriver_exporter.StackdriverExporter(project_id='census-demos')
+tracer = tracer_module.Tracer(exporter=exporter)
 
 def main():
   while True:
@@ -46,7 +46,7 @@ def doSearch(query):
           print('ChannelURL: https://www.youtube.com/channel/{channelId}'.format(**item['id']))
 
         snippet = item['snippet']
-        snippet.setdefault('description', '')
+        snippet.setdefault('description', 'Unknown')
         print('Title: {title}\nDescription: {description}\n\n'.format(**snippet))
 
 if __name__ == '__main__':
