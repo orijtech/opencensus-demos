@@ -70,6 +70,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to build POST request: %v", err)
 		}
+		req.Header.Set("User-Agent", "media-search/go-client")
 		ctx, span := trace.StartSpan(context.Background(), "go-search")
 		span.Annotate(
 			[]trace.Attribute{
@@ -77,12 +78,12 @@ func main() {
 			}, "identifiers")
 		req = req.WithContext(ctx)
 		res, err := client.Do(req)
-		span.End()
 		if err != nil {
 			log.Fatalf("Failed to POST: %v", err)
 		}
 		outBlob, err := ioutil.ReadAll(res.Body)
 		_ = res.Body.Close()
+		span.End()
 		if err != nil {
 			log.Fatalf("Failed to read res.Body: %v", err)
 		}

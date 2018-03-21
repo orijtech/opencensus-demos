@@ -166,7 +166,7 @@ func search(w http.ResponseWriter, r *http.Request) {
 	txn.Set(ctx, []byte(keywords), outBlob)
 	_ = txn.Commit(ctx, func(err error) {})
 
-	w.Write(outBlob)
+	_, _ = w.Write(outBlob)
 }
 
 func parseJSON(ctx context.Context, r io.Reader, recv interface{}) error {
