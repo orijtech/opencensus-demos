@@ -41,19 +41,24 @@ var yc *youtube.Client
 var db *badger.DB
 
 func init() {
-	trace.SetDefaultSampler(trace.AlwaysSample())
 	xe, err := xray.NewExporter(xray.WithVersion("latest"))
 	if err != nil {
 		log.Fatalf("X-Ray newExporter: %v", err)
 	}
-	trace.RegisterExporter(xe)
 	se, err := stackdriver.NewExporter(stackdriver.Options{ProjectID: "census-demos"})
 	if err != nil {
 		log.Fatalf("Stackdriver newExporter: %v", err)
 	}
+
+	// Now register the exporters
+	trace.RegisterExporter(xe)
 	trace.RegisterExporter(se)
 	view.RegisterExporter(se)
-	if err := view.Subscribe(ochttp.DefaultServerViews...); err != nil {
+
+	// And then set the trace config with the default sampler.
+	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
+
+	if err := view.Register(ochttp.DefaultServerViews...); err != nil {
 		log.Fatalf("Failed to subscribe to views: %v", err)
 	}
 	log.Printf("Finished exporter registration")
