@@ -33,7 +33,7 @@ import (
 )
 
 func init() {
-	trace.SetDefaultSampler(trace.AlwaysSample())
+	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
 	xe, err := xray.NewExporter(xray.WithVersion("latest"))
 	if err != nil {
 		log.Fatalf("X-Ray newExporter: %v", err)
@@ -61,7 +61,7 @@ func main() {
 			log.Fatalf("Failed to read input: %v", err)
 		}
 		inBlob, err := json.Marshal(map[string]string{
-			"keywords": string(input),
+			"q": string(input),
 		})
 		if err != nil {
 			log.Fatalf("Failed to json.Marshal input blob: %v", err)
@@ -71,11 +71,7 @@ func main() {
 			log.Fatalf("Failed to build POST request: %v", err)
 		}
 		req.Header.Set("User-Agent", "media-search/go-client")
-		ctx, span := trace.StartSpan(context.Background(), "go-search")
-		span.Annotate(
-			[]trace.Attribute{
-				trace.StringAttribute("client", "go"),
-			}, "identifiers")
+		ctx, span := trace.StartSpan(context.Background(), "media-search")
 		req = req.WithContext(ctx)
 		res, err := client.Do(req)
 		if err != nil {
@@ -87,6 +83,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to read res.Body: %v", err)
 		}
-		fmt.Printf("%s\n\nsc: %+v\n\n", outBlob, span.SpanContext())
+		fmt.Printf("%s\n\n", outBlob)
 	}
 }

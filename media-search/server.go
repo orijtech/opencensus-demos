@@ -15,30 +15,40 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"reflect"
+	"time"
 
 	"golang.org/x/net/context"
 
-	"github.com/dgraph-io/badger"
+	gat "google.golang.org/api/googleapi/transport"
+
+	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/mongodb/mongo-go-driver/mongo"
 
 	xray "github.com/census-instrumentation/opencensus-go-exporter-aws"
+	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/exporter/stackdriver"
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/plugin/ochttp/propagation/b3"
+	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
+	"go.opencensus.io/tag"
 	"go.opencensus.io/trace"
 
+	"github.com/orijtech/otils"
 	"github.com/orijtech/youtube"
-	gat "google.golang.org/api/googleapi/transport"
 )
 
 var yc *youtube.Client
-var db *badger.DB
+var ytSearchesCollection *mongo.Collection
 
 func init() {
 	xe, err := xray.NewExporter(xray.WithVersion("latest"))
@@ -49,19 +59,59 @@ func init() {
 	if err != nil {
 		log.Fatalf("Stackdriver newExporter: %v", err)
 	}
+	pe, err := prometheus.NewExporter(prometheus.Options{Namespace: "mediasearch"})
+	if err != nil {
+		log.Fatalf("Prometheus newExporter: %v", err)
+	}
 
 	// Now register the exporters
 	trace.RegisterExporter(xe)
 	trace.RegisterExporter(se)
 	view.RegisterExporter(se)
+	view.RegisterExporter(pe)
+
+	// Serve the Prometheus metrics
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", pe)
+		log.Fatal(http.ListenAndServe(":9888", mux))
+	}()
 
 	// And then set the trace config with the default sampler.
 	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
+	view.SetReportingPeriod(250 * time.Millisecond)
 
 	if err := view.Register(ochttp.DefaultServerViews...); err != nil {
-		log.Fatalf("Failed to subscribe to views: %v", err)
+		log.Fatalf("Failed to register views: %v", err)
 	}
-	log.Printf("Finished exporter registration")
+
+	mustKey := func(sk string) tag.Key {
+		k, err := tag.NewKey(sk)
+		if err != nil {
+			log.Fatalf("Creating new key %q error: %v", sk, err)
+		}
+		return k
+	}
+
+	// And then for the custom views
+	err = view.Register([]*view.View{
+		{Name: "cache_hits", Description: "cache hits", Measure: cacheHits, Aggregation: view.Count()},
+		{Name: "cache_misses", Description: "cache misses", Measure: cacheMisses, Aggregation: view.Count()},
+		{
+			Name: "cache_insertion_errors", Description: "cache insertion errors",
+			Measure: cacheInsertionErrors, Aggregation: view.Count(), TagKeys: []tag.Key{mustKey("cache_errors")},
+		},
+		{
+			Name: "youtube_api_errors", Description: "youtube errors",
+			Measure: youtubeAPIErrors, Aggregation: view.Count(),
+			TagKeys: []tag.Key{mustKey("api"), mustKey("youtube_api")},
+		},
+	}...)
+	if err != nil {
+		log.Fatalf("Failed to register custom views: %v", err)
+	}
+
+	log.Printf("Successfully finished exporter and view registration")
 
 	envAPIKey := os.Getenv("YOUTUBE_API_KEY")
 	yc, err = youtube.NewWithHTTPClient(&http.Client{
@@ -70,24 +120,18 @@ func init() {
 	if err != nil {
 		log.Fatalf("Failed to create youtube API client: %v", err)
 	}
+
+	// Log into MongoDB
+	mongoServerURI := otils.EnvOrAlternates("MEDIA_SEARCH_MONGO_SERVER_URI", "localhost:27017")
+	mongoClient, err := mongo.NewClient("mongodb://" + mongoServerURI)
+	if err != nil {
+		log.Fatalf("Failed to log into Mongo error: %v", err)
+	}
+	// Create or get the searches collection.
+	ytSearchesCollection = mongoClient.Database("media-searches").Collection("youtube_searches")
 }
 
 func main() {
-	dir, err := ioutil.TempDir("", "badger")
-	if err != nil {
-		log.Fatal(err)
-	}
-	ctx := context.Background()
-
-	defer os.RemoveAll(dir)
-	opts := badger.DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = dir
-	db, err = badger.Open(ctx, opts)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	addr := ":9778"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/search", search)
@@ -96,6 +140,9 @@ func main() {
 		Handler:     mux,
 		Propagation: &b3.HTTPFormat{},
 	}
+	if err := view.Register(ochttp.DefaultServerViews...); err != nil {
+		log.Fatalf("Error register all the default Server views: %v", err)
+	}
 	log.Printf("Serving on %q", addr)
 	if err := http.ListenAndServe(addr, h); err != nil {
 		log.Fatalf("ListenAndServe err: %v", err)
@@ -103,9 +150,56 @@ func main() {
 }
 
 type query struct {
-	Keywords   string `json:"keywords"`
+	Keywords   string `json:"q"`
 	MaxPerPage int64  `json:"max_per_page"`
 	MaxPages   int64  `json:"max_pages"`
+}
+
+type dbCacheKV struct {
+	Key       string    `json:"key" bson:"key,omitempty"`
+	Value     []byte    `json:"value" bson:"value,omitempty"`
+	CacheTime time.Time `json:"ct" bson:"ct,omitempty"`
+}
+
+func parseQuery(ctx context.Context, req *http.Request) (*query, error) {
+	ctx, span := trace.StartSpan(ctx, "parseQuery")
+	defer span.End()
+
+	var body io.Reader
+	switch req.Method {
+	default:
+		return nil, fmt.Errorf("Unsupported method: %q", req.Method)
+
+	case "POST", "PUT":
+		body = req.Body
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("method", req.Method),
+			trace.BoolAttribute("has_body", true),
+		}, "http_style")
+
+	case "GET":
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("method", "GET"),
+			trace.BoolAttribute("has_body", false),
+		}, "http_style")
+
+		qv := req.URL.Query()
+		outMap := make(map[string]string)
+		for key := range qv {
+			outMap[key] = qv.Get(key)
+		}
+		intermediateBlob, err := json.Marshal(outMap)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(intermediateBlob)
+	}
+
+	q := new(query)
+	if err := parseJSON(ctx, body, q); err != nil {
+		return nil, err
+	}
+	return q, nil
 }
 
 func search(w http.ResponseWriter, r *http.Request) {
@@ -114,65 +208,88 @@ func search(w http.ResponseWriter, r *http.Request) {
 	ctx, span := trace.StartSpan(r.Context(), "/search")
 	defer span.End()
 
-	q := new(query)
-	if err := parseJSON(ctx, r.Body, q); err != nil {
+	q, err := parseQuery(ctx, r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	q.setDefaultLimits()
 
 	keywords := q.Keywords
-	var outBlob []byte
+	filter := bson.NewDocument(bson.EC.String("key", q.Keywords))
+	dbRes := ytSearchesCollection.FindOne(ctx, filter)
 	// 1. Firstly check if this has been cached before
-	err := db.View(ctx, func(cctx context.Context, txn *badger.Txn) error {
-		item, err := txn.Get(cctx, []byte(keywords))
-		if err != nil {
-			if err == badger.ErrKeyNotFound {
-				return nil
-			}
-			return err
-		}
-		log.Printf("item: %+v\n", item)
-		outBlob, err = item.Value()
-		return err
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if len(outBlob) > 0 {
+	cachedKV := new(dbCacheKV)
+	if err := dbRes.Decode(cachedKV); err == nil && !reflect.DeepEqual(cachedKV, blankDBKV) {
 		// Cache hit!
-		w.Write(outBlob)
+		span.Annotate([]trace.Attribute{
+			trace.BoolAttribute("hit", true),
+			trace.StringAttribute("db", "mongodb"),
+			trace.StringAttribute("driver", "go"),
+		}, "search")
+		stats.Record(ctx, cacheHits.M(1))
+		w.Write(cachedKV.Value)
 		return
 	}
 
 	// 2. Otherwise that was a cache-miss, now retrieve it then save it
+	stats.Record(ctx, cacheMisses.M(1))
+
 	pagesChan, err := yc.Search(ctx, &youtube.SearchParam{
 		Query:             keywords,
 		MaxPage:           uint64(q.MaxPages),
 		MaxResultsPerPage: uint64(q.MaxPerPage),
 	})
 	if err != nil {
+		stats.Record(ctx, youtubeAPIErrors.M(1))
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("api_error", err.Error()),
+			trace.StringAttribute("db", "mongodb"),
+			trace.StringAttribute("driver", "go"),
+		}, "error")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	span.Annotate([]trace.Attribute{
+		trace.BoolAttribute("hit", false),
+		trace.StringAttribute("db", "mongodb"),
+		trace.StringAttribute("driver", "go"),
+	}, "search")
 	var pages []*youtube.SearchPage
 	for page := range pagesChan {
 		pages = append(pages, page)
 	}
-	outBlob, err = json.Marshal(pages)
+	outBlob, err := json.Marshal(pages)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Now cache it so that next time it'll be a hit.
-	txn := db.NewTransaction(ctx, true)
-	txn.Set(ctx, []byte(keywords), outBlob)
-	_ = txn.Commit(ctx, func(err error) {})
+	// 3. Now cache it so that next time it'll be a hit.
+	insertKV := &dbCacheKV{
+		Key:       keywords,
+		Value:     outBlob,
+		CacheTime: time.Now(),
+	}
+
+	if _, err := ytSearchesCollection.InsertOne(ctx, insertKV); err != nil {
+		stats.Record(ctx, cacheInsertionErrors.M(1))
+	}
 
 	_, _ = w.Write(outBlob)
 }
+
+var (
+	cacheHits   = stats.Int64("cache_hits", "the number of cache hits", stats.UnitNone)
+	cacheMisses = stats.Int64("cache_misses", "the number of cache misses", stats.UnitNone)
+
+	cacheInsertionErrors = stats.Int64("cache_insertion_errors", "the number of cache insertion errors", stats.UnitNone)
+
+	youtubeAPIErrors = stats.Int64("youtube_api_errors", "the number of youtube API lookup errors", stats.UnitNone)
+
+	blankDBKV = new(dbCacheKV)
+)
 
 func parseJSON(ctx context.Context, r io.Reader, recv interface{}) error {
 	ctx, span := trace.StartSpan(ctx, "/parse-json")

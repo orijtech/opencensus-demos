@@ -34,7 +34,7 @@ def main():
 
 def doSearch(query):
   with tracer.span(name='py-search') as span:
-    res = requests.post('http://localhost:9778/search', json={'keywords': query})
+    res = requests.post('http://localhost:9778/search', json={'q': query})
     pages = res.json()
     for page in pages:
       items = page['Items']
