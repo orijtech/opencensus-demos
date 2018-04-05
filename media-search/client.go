@@ -17,7 +17,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -30,6 +29,8 @@ import (
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
+
+	"github.com/orijtech/youtube"
 )
 
 func init() {
@@ -45,14 +46,13 @@ func init() {
 	}
 	trace.RegisterExporter(se)
 	view.RegisterExporter(se)
-	if err := view.Subscribe(ochttp.DefaultClientViews...); err != nil {
-		log.Fatalf("Failed to subscribe to views: %v", err)
+	if err := view.Register(ochttp.DefaultClientViews...); err != nil {
+		log.Fatalf("Failed to register views: %v", err)
 	}
-	log.Printf("Finished exporter registration")
 }
 
 func main() {
-	client := &http.Client{Transport: &ochttp.Transport{}}
+	client := &http.Client{}
 	br := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Printf("Content to search$ ")
@@ -70,19 +70,33 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to build POST request: %v", err)
 		}
-		req.Header.Set("User-Agent", "media-search/go-client")
-		ctx, span := trace.StartSpan(context.Background(), "media-search")
-		req = req.WithContext(ctx)
 		res, err := client.Do(req)
 		if err != nil {
 			log.Fatalf("Failed to POST: %v", err)
 		}
 		outBlob, err := ioutil.ReadAll(res.Body)
 		_ = res.Body.Close()
-		span.End()
 		if err != nil {
 			log.Fatalf("Failed to read res.Body: %v", err)
 		}
-		fmt.Printf("%s\n\n", outBlob)
+		var pages []*youtube.SearchPage
+		if err := json.Unmarshal(outBlob, &pages); err != nil {
+			log.Fatalf("Unmarshaling responses: %v", err)
+		}
+		for _, page := range pages {
+			for _, video := range page.Items {
+				if video == nil {
+					continue
+				}
+				snippet := video.Snippet
+				if video.Id.VideoId != "" {
+					fmt.Printf("URL: https://youtu.be/%s\n", video.Id.VideoId)
+				} else if video.Id.ChannelId != "" {
+					fmt.Printf("ChannelURL: https://www.youtube.com/channel/%s\n",
+						video.Id.ChannelId)
+				}
+				fmt.Printf("Title: %s\nDescription: %s\n\n\n", snippet.Title, snippet.Description)
+			}
+		}
 	}
 }

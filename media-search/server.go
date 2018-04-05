@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,8 +26,6 @@ import (
 	"os"
 	"reflect"
 	"time"
-
-	"golang.org/x/net/context"
 
 	gat "google.golang.org/api/googleapi/transport"
 
@@ -226,7 +225,7 @@ func search(w http.ResponseWriter, r *http.Request) {
 			trace.BoolAttribute("hit", true),
 			trace.StringAttribute("db", "mongodb"),
 			trace.StringAttribute("driver", "go"),
-		}, "search")
+		}, "Cache hit")
 		stats.Record(ctx, cacheHits.M(1))
 		w.Write(cachedKV.Value)
 		return
@@ -246,7 +245,7 @@ func search(w http.ResponseWriter, r *http.Request) {
 			trace.StringAttribute("api_error", err.Error()),
 			trace.StringAttribute("db", "mongodb"),
 			trace.StringAttribute("driver", "go"),
-		}, "error")
+		}, "YouTube API search error")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -255,7 +254,7 @@ func search(w http.ResponseWriter, r *http.Request) {
 		trace.BoolAttribute("hit", false),
 		trace.StringAttribute("db", "mongodb"),
 		trace.StringAttribute("driver", "go"),
-	}, "search")
+	}, "Cache miss, hence YouTube API search")
 	var pages []*youtube.SearchPage
 	for page := range pagesChan {
 		pages = append(pages, page)
