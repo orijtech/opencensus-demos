@@ -1,0 +1,69 @@
+body.app {
+	margin: 0;
+	padding: 0;
+	font-family: 'Open Sans', sans-serif;
+
+	/* Easy centering */
+	position: absolute;
+	bottom: 0;
+	right: 0;
+	left: 0;
+	top: 0;
+	display: flex;
+	flex-direction: column;
+	align-content: center;
+	justify-content: center;
+}
+
+.section {
+	flex: 1;
+}
+
+.search-section {
+	display: flex;
+	align-content: center;
+	justify-content: center;
+}
+
+.search-section-collapsed {
+	flex: 0;
+	min-height: 100px;
+}
+
+.search-container {
+	align-self: flex-end;
+	position: relative;
+}
+
+.search-container input {
+	border: none;
+	font-size: 3em;
+	width: calc(100% - 80px);
+}
+
+.search-container input:focus {
+	outline: none;
+}
+
+.search-button {
+	border: none;
+	background: green;
+	border-radius: 4px;
+	font-size: 2em;
+	color: #fff;
+	cursor: pointer;
+	background: #87e1ff;
+
+	position: absolute;
+	right: 10px;
+	top: 5px;
+	bottom: 5px;
+}
+
+.search-button:focus {
+	outline: none;
+}
+
+.results-section {
+	background: #87e1ff; /* pleasant blue /*
+}
