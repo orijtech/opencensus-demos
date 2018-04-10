@@ -41,7 +41,7 @@ func init() {
 		log.Fatalf("X-Ray newExporter: %v", err)
 	}
 	trace.RegisterExporter(xe)
-	se, err := stackdriver.NewExporter(stackdriver.Options{ProjectID: "census-demos"})
+	se, err := stackdriver.NewExporter(stackdriver.Options{ProjectID: otils.EnvOrAlternates("OPENCENSUS_GCP_PROJECTID", "census-demos")})
 	if err != nil {
 		log.Fatalf("Stackdriver newExporter: %v", err)
 	}
