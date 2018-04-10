@@ -30,6 +30,7 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/trace"
 
+	"github.com/orijtech/otils"
 	"github.com/orijtech/youtube"
 )
 
@@ -76,6 +77,10 @@ func main() {
 		}
 		outBlob, err := ioutil.ReadAll(res.Body)
 		_ = res.Body.Close()
+		if !otils.StatusOK(res.StatusCode) {
+			log.Printf("Error encountered: statusCode: %d message: %s", res.StatusCode, outBlob)
+			continue
+		}
 		if err != nil {
 			log.Fatalf("Failed to read res.Body: %v", err)
 		}

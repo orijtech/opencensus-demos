@@ -99,11 +99,15 @@ func init() {
 		{
 			Name: "cache_insertion_errors", Description: "cache insertion errors",
 			Measure: cacheInsertionErrors, Aggregation: view.Count(), TagKeys: []tag.Key{mustKey("cache_errors")},
-		},
-		{
+		}, {
+
 			Name: "youtube_api_errors", Description: "youtube errors",
 			Measure: youtubeAPIErrors, Aggregation: view.Count(),
 			TagKeys: []tag.Key{mustKey("api"), mustKey("youtube_api")},
+		}, {
+			Name: "mongo_errors", Description: "MongoDB errors",
+			Measure: mongoErrors, Aggregation: view.Count(),
+			TagKeys: []tag.Key{mustKey("api"), mustKey("mongo")},
 		},
 	}...)
 	if err != nil {
@@ -123,6 +127,7 @@ func init() {
 	// Log into MongoDB
 	mongoServerURI := otils.EnvOrAlternates("MEDIA_SEARCH_MONGO_SERVER_URI", "localhost:27017")
 	mongoClient, err := mongo.NewClient("mongodb://" + mongoServerURI)
+log.Printf("mongoServerURI: %q\n", mongoServerURI)
 	if err != nil {
 		log.Fatalf("Failed to log into Mongo error: %v", err)
 	}
@@ -174,13 +179,13 @@ func parseQuery(ctx context.Context, req *http.Request) (*query, error) {
 		span.Annotate([]trace.Attribute{
 			trace.StringAttribute("method", req.Method),
 			trace.BoolAttribute("has_body", true),
-		}, "http_style")
+		}, "Parsed a POST/PUT request")
 
 	case "GET":
 		span.Annotate([]trace.Attribute{
 			trace.StringAttribute("method", "GET"),
 			trace.BoolAttribute("has_body", false),
-		}, "http_style")
+		}, "Parsed a GET request")
 
 		qv := req.URL.Query()
 		outMap := make(map[string]string)
@@ -216,23 +221,48 @@ func search(w http.ResponseWriter, r *http.Request) {
 
 	keywords := q.Keywords
 	filter := bson.NewDocument(bson.EC.String("key", q.Keywords))
+
+	span.Annotate([]trace.Attribute{
+		trace.StringAttribute("db", "mongodb"),
+		trace.StringAttribute("driver", "go"),
+	}, "Checking cache if the query is present")
+
 	dbRes := ytSearchesCollection.FindOne(ctx, filter)
 	// 1. Firstly check if this has been cached before
 	cachedKV := new(dbCacheKV)
-	if err := dbRes.Decode(cachedKV); err == nil && !reflect.DeepEqual(cachedKV, blankDBKV) {
-		// Cache hit!
-		span.Annotate([]trace.Attribute{
-			trace.BoolAttribute("hit", true),
-			trace.StringAttribute("db", "mongodb"),
-			trace.StringAttribute("driver", "go"),
-		}, "Cache hit")
-		stats.Record(ctx, cacheHits.M(1))
-		w.Write(cachedKV.Value)
+
+	switch err := dbRes.Decode(cachedKV); err {
+	default:
+		stats.Record(ctx, mongoErrors.M(1))
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+
+	case nil: // Cache hit!
+		if !reflect.DeepEqual(cachedKV, blankDBKV) {
+			span.Annotate([]trace.Attribute{
+				trace.BoolAttribute("hit", true),
+				trace.StringAttribute("db", "mongodb"),
+				trace.StringAttribute("driver", "go"),
+			}, "Cache hit")
+			stats.Record(ctx, cacheHits.M(1))
+			w.Write(cachedKV.Value)
+			return
+		}
+
+		// Otherwise this is false cache hit!
+
+	case bson.ErrElementNotFound, mongo.ErrNoDocuments:
+		// Cache miss, now retrieve the results below
 	}
 
 	// 2. Otherwise that was a cache-miss, now retrieve it then save it
 	stats.Record(ctx, cacheMisses.M(1))
+
+	span.Annotate([]trace.Attribute{
+		trace.BoolAttribute("hit", false),
+		trace.StringAttribute("db", "mongodb"),
+		trace.StringAttribute("driver", "go"),
+	}, "Cache miss, hence YouTube API search")
 
 	pagesChan, err := yc.Search(ctx, &youtube.SearchParam{
 		Query:             keywords,
@@ -250,11 +280,6 @@ func search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	span.Annotate([]trace.Attribute{
-		trace.BoolAttribute("hit", false),
-		trace.StringAttribute("db", "mongodb"),
-		trace.StringAttribute("driver", "go"),
-	}, "Cache miss, hence YouTube API search")
 	var pages []*youtube.SearchPage
 	for page := range pagesChan {
 		pages = append(pages, page)
@@ -286,6 +311,7 @@ var (
 	cacheInsertionErrors = stats.Int64("cache_insertion_errors", "the number of cache insertion errors", stats.UnitNone)
 
 	youtubeAPIErrors = stats.Int64("youtube_api_errors", "the number of youtube API lookup errors", stats.UnitNone)
+	mongoErrors      = stats.Int64("mongo_errors", "the number of MongoDB errors", stats.UnitNone)
 
 	blankDBKV = new(dbCacheKV)
 )
