@@ -12,7 +12,6 @@ body.app {
 	display: flex;
 	flex-direction: column;
 	align-content: center;
-	justify-content: center;
 }
 
 .section {
@@ -65,5 +64,62 @@ body.app {
 }
 
 .results-section {
-	background: #87e1ff; /* pleasant blue /*
+	background: #87e1ff; /* pleasant blue */
+	/*display: flex;*/
+	padding: 40px 100px;
+}
+
+.result-container {
+	float: left;
+	width: 31%;
+	margin-right: 10px;
+	margin-bottom: 20px;
+    background: #fff;
+    border-radius: 4px;
+    overflow: hidden;
+    padding: 0;
+	box-shadow: 0 1px #FFFFFF inset, 0 1px 3px rgba(34, 25, 25, 0.4);
+	position: relative;
+}
+
+.result-link {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+}
+
+.result-image-container {
+	width: 100%;
+	padding-bottom: 56.25%;
+}
+
+.result-title {
+	padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 10px;
+    background: #fff;
+    margin: 0;
+}
+
+@-webkit-keyframes rotate{
+	to{-webkit-transform: rotate(360deg);}
+}
+
+@keyframes rotate {
+	to{transform: rotate(360deg);}
+}
+
+.hidden {
+	display: none !important;
+}
+
+.loader {
+	animation: rotate 1.5s ease infinite;
+	-webkit-animation: rotate 1.5s ease infinite;
+	color: #fff;
+	font-size: 3em;
+	display: block;
+	text-align: center;
 }
