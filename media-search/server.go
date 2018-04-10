@@ -139,6 +139,7 @@ func main() {
 	addr := ":9778"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/search", search)
+	mux.Handle("/", http.FileServer(http.Dir("./static")))
 
 	h := &ochttp.Handler{
 		Handler:     mux,
